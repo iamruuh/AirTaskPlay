@@ -1,0 +1,42 @@
+name: Build APK
+on:
+  push:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch AirPlay native dependencies (pinned commit)
+        uses: actions/checkout@v4
+        with:
+          repository: jqssun/android-airplay-server
+          ref: a46cca0a6a1274e9e33c0e750f0f1c1eb1d881ea
+          submodules: recursive
+          path: airplay-upstream
+      - name: Prepare native sources
+        run: |
+          cp -a airplay-upstream/app/src/main/cpp/third_party app/src/main/cpp/third_party
+          rm -rf airplay-upstream
+          find app/src/main/cpp/third_party -name .git -prune -exec rm -rf {} +
+          rm -rf /tmp/ux && cp -a app/src/main/cpp/third_party/UxPlay /tmp/ux
+          (cd /tmp/ux && git init -q && for p in "$GITHUB_WORKSPACE"/app/src/main/cpp/patches/UxPlay/*.patch; do echo "apply $p"; git apply --unidiff-zero "$p"; done)
+          rm -rf app/src/main/cpp/third_party/UxPlay /tmp/ux/.git
+          cp -a /tmp/ux app/src/main/cpp/third_party/UxPlay
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 17 }
+      - uses: gradle/actions/setup-gradle@v3
+        with: { gradle-version: "8.7" }
+      - run: gradle assembleRelease --no-daemon --stacktrace
+      - run: cp app/build/outputs/apk/release/app-release.apk AirTaskPlay.apk
+      - uses: actions/upload-artifact@v4
+        with: { name: AirTaskPlay-apk, path: AirTaskPlay.apk }
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: AirTaskPlay.apk
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
